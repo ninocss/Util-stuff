@@ -1,0 +1,6 @@
+librosa
+soundfile
+numpy
+scipy
+pyinstaller
+yt-dlp
