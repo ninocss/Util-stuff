@@ -9,6 +9,7 @@ Wichtiges
 - Abhängigkeiten stehen in `requirements.txt`.
 - Zum Erzeugen einer portablen Windows-EXE benutze `build_exe.bat` (benötigt `PyInstaller`).
 - Für FLAC/WAV/M4A/MP3-Presets wird `ffmpeg` benötigt. Lege `ffmpeg.exe` und `ffprobe.exe` in `vendor\ffmpeg\` oder ins Projektverzeichnis.
+- Der Tab `Video Clips` benötigt zusätzlich `scenedetect` für die Scene-Erkennung.
 
 Schnellstart (Windows)
 ----------------------
@@ -42,6 +43,7 @@ Anpassungen
 -----------
 - UI: Windows-11-inspiriertes Look & Feel, Sekundär-Tab für Audio-Download mit Presets.
 - Optional: Automatische Beat-Marker-Erstellung nach Download (Checkbox im Download-Tab).
+- Neuer Tab: Video-Link eingeben, Proxy-Analyse starten und bis zu `max_clips` Clips aus den erkannten Szenen extrahieren.
 
 Lizenz & Haftung
 ----------------
