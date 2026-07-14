@@ -5,3 +5,5 @@ scipy
 pyinstaller
 yt-dlp
 scenedetect
+sv-ttk
+pywinstyles

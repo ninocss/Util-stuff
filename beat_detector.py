@@ -41,9 +41,6 @@ def _add_bundled_ffmpeg():
 
 _add_bundled_ffmpeg()
 
-# Windowed-Builds (PyInstaller --windowed) haben kein Konsolenfenster ->
-# sys.stdout/sys.stderr sind None. tqdm (intern in scenedetect) crasht dann
-# mit "NoneType has no attribute 'write'". Baseline-Fallback dagegen:
 if sys.stdout is None:
     sys.stdout = open(os.devnull, "w")
 if sys.stderr is None:
@@ -51,22 +48,6 @@ if sys.stderr is None:
 
 
 class ConsoleRedirector:
-    """
-    File-like Objekt, das Schreibzugriffe threadsicher in ein Text-Widget leitet.
-
-    Wichtige Unterschiede zur naiven Variante:
-    - Schreibaufrufe werden GEPUFFERT und nur alle `flush_interval_ms` Millisekunden
-      in einem Rutsch ins Widget geschrieben. ffmpeg/tqdm schreiben teils mehrfach
-      pro Frame -> ohne Puffer erzeugt jeder einzelne write() ein volles
-      Tk-Widget-Update (insert + see + configure), was die GUI massiv ausbremst.
-    - '\r' (Carriage Return) wird wie im echten Terminal behandelt: die aktuelle
-      Zeile wird überschrieben statt endlos angehängt zu werden. Ohne das wächst
-      das Textwidget bei jedem Fortschrittsbalken-Tick unbegrenzt weiter, was
-      insert()/see() zunehmend langsamer macht.
-    - Die Zeilenanzahl wird gedeckelt (max_lines), alte Zeilen werden verworfen,
-      damit das Widget auch bei langer Laufzeit nicht immer größer wird.
-    """
-
     def __init__(self, widget, root, max_lines=500, flush_interval_ms=80):
         self.widget = widget
         self.root = root
@@ -96,19 +77,14 @@ class ConsoleRedirector:
 
         self.widget.configure(state="normal")
 
-        # '\r' überschreibt die aktuelle Zeile (Terminal-Verhalten), '\n' erzeugt
-        # eine neue Zeile. So wird z.B. der ffmpeg-Fortschrittsbalken in-place
-        # aktualisiert statt das Widget zuzumüllen.
         parts = text.split("\r")
         for i, chunk in enumerate(parts):
             if i > 0:
-                # neuer '\r'-Block: aktuelle Zeile löschen, bevor neu geschrieben wird
                 line_start = self.widget.index("end-1c linestart")
                 self.widget.delete(line_start, "end-1c")
             if chunk:
                 self.widget.insert(tk.END, chunk)
 
-        # Zeilenanzahl deckeln, damit das Widget nicht unbegrenzt wächst
         line_count = int(self.widget.index("end-1c").split(".")[0])
         if line_count > self.max_lines:
             self.widget.delete("1.0", f"{line_count - self.max_lines}.0")
@@ -126,7 +102,7 @@ class ConsoleRedirector:
 class BeatMarkerApp:
     def __init__(self, root):
         self.root = root
-        root.title("util stuff")
+        root.title("Utility")
         self._apply_windows11_style()
 
         root.columnconfigure(0, weight=1)
@@ -138,9 +114,9 @@ class BeatMarkerApp:
         self.beat_tab = ttk.Frame(self.notebook, padding=12)
         self.download_tab = ttk.Frame(self.notebook, padding=12)
         self.clip_tab = ttk.Frame(self.notebook, padding=12)
-        self.notebook.add(self.download_tab, text="Audio Download")
-        self.notebook.add(self.beat_tab, text="Beat Marker")
-        self.notebook.add(self.clip_tab, text="Video Clips")
+        self.notebook.add(self.download_tab, text="Download")
+        self.notebook.add(self.beat_tab, text="Marker")
+        self.notebook.add(self.clip_tab, text="Clips")
 
         self.default_download_folder = self._get_downloads_folder()
         self.selected_output = None
@@ -326,7 +302,6 @@ class BeatMarkerApp:
         self.open_clip_folder_button = ttk.Button(self.clip_tab, text="Open Folder", command=self.open_clip_folder, state=tk.DISABLED)
         self.open_clip_folder_button.grid(row=8, column=2, padx=8, pady=6, sticky="e")
 
-        # Einklappbarer Console-Output-Bereich: Klick auf den Button toggled die Sichtbarkeit
         self.console_toggle_button = ttk.Button(
             self.clip_tab, text="▼ Console Output", command=self._toggle_console
         )
@@ -403,6 +378,20 @@ class BeatMarkerApp:
             self.download_anim_label.config(text="")
         elif key == "clip":
             self.clip_anim_label.config(text="")
+
+    def _yt_dlp_progress_hook(self, d, progress_bar):
+        if d['status'] == 'downloading':
+            try:
+                total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate')
+                downloaded = d.get('downloaded_bytes', 0)
+                if total_bytes and total_bytes > 0:
+                    percentage = (downloaded / total_bytes) * 100
+                    self.root.after(0, lambda: progress_bar.config(mode="determinate", maximum=100, value=percentage))
+            except Exception:
+                pass
+        elif d['status'] == 'finished':
+            self.root.after(0, lambda: progress_bar.config(mode="indeterminate"))
+            self.root.after(0, lambda: progress_bar.start(10))
 
     def process(self):
         input_path = self.input_entry.get()
@@ -581,6 +570,9 @@ class BeatMarkerApp:
 
         try:
             self._download_clip_source(url, input_highres)
+            
+            self.root.after(0, lambda: self.clip_progress.config(mode="indeterminate"))
+            self.root.after(0, lambda: self.clip_progress.start(10))
             self.root.after(0, lambda: self.clip_status_label.config(text="Creating proxy for analysis..."))
             self._create_proxy(input_highres, input_proxy)
 
@@ -608,6 +600,7 @@ class BeatMarkerApp:
             "noplaylist": True,
             "quiet": True,
             "no_warnings": True,
+            "progress_hooks": [lambda d: self._yt_dlp_progress_hook(d, self.clip_progress)],
         }
 
         with yt_dlp.YoutubeDL(options) as ydl:
@@ -770,7 +763,7 @@ class BeatMarkerApp:
 
     def _download_thread(self, url, preset_key, target_folder, create_marker, marker_format, click_duration, click_amplitude):
         try:
-            output_path = self._download_audio_file(url, preset_key, target_folder)
+            output_path = self._download_audio_file(url, preset_key, target_folder, self.download_progress)
             marker_path = None
             if create_marker:
                 marker_path = self._build_marker_output_path(output_path, marker_format)
@@ -808,12 +801,13 @@ class BeatMarkerApp:
         }
         return mapping.get(preset, "flac")
 
-    def _download_audio_file(self, url, preset_key, target_folder):
+    def _download_audio_file(self, url, preset_key, target_folder, progress_bar):
         options = {
             "outtmpl": os.path.join(target_folder, "%(title)s.%(ext)s"),
             "noplaylist": True,
             "quiet": True,
             "no_warnings": True,
+            "progress_hooks": [lambda d: self._yt_dlp_progress_hook(d, progress_bar)],
         }
 
         if preset_key == "best":
@@ -856,8 +850,8 @@ class BeatMarkerApp:
             marker_audio[start:end] = click_amplitude
 
         fmt = os.path.splitext(output_path)[1].lstrip('.').lower()
-        # soundfile infers format from extension for common cases
-        sf.write(output_path, marker_audio, sr, format=fmt if fmt in ('FLAC', 'WAV', 'OGG') else None)
+        sf.write(output_path, marker_audio, sr, format=fmt if fmt in ('flac', 'wav', 'ogg') else None)
+
 
 if __name__ == "__main__":
     root = tk.Tk()
