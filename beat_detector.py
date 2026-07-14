@@ -98,13 +98,58 @@ class ConsoleRedirector:
     def isatty(self):
         return False
 
+class ToolTip:
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tooltipwindow = None
+        self.id = None
+        self.widget.bind("<Enter>", self.enter)
+        self.widget.bind("<Leave>", self.leave)
+
+    def enter(self, event=None):
+        self.schedule()
+
+    def leave(self, event=None):
+        self.unschedule()
+        self.hidetip()
+
+    def schedule(self):
+        self.unschedule()
+        self.id = self.widget.after(500, self.showtip)
+
+    def unschedule(self):
+        id = self.id
+        self.id = None
+        if id:
+            self.widget.after_cancel(id)
+
+    def showtip(self, event=None):
+        try:
+            x, y, cx, cy = self.widget.bbox("insert")
+        except tk.TclError:
+            x, y, cx, cy = 0, 0, 0, 0
+        x = x + self.widget.winfo_rootx() + 25
+        y = y + self.widget.winfo_rooty() + 20
+        self.tooltipwindow = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry("+%d+%d" % (x, y))
+        label = tk.Label(tw, text=self.text, justify='left',
+                         background="#ffffe0", relief='solid', borderwidth=1,
+                         font=("Segoe UI", 9, "normal"))
+        label.pack(ipadx=1)
+
+    def hidetip(self):
+        tw = self.tooltipwindow
+        self.tooltipwindow = None
+        if tw:
+            tw.destroy()
+
 
 class BeatMarkerApp:
     def __init__(self, root):
         self.root = root
         root.title("Utility")
-        root.geometry("800x600")
-        root.minsize(700, 500)
         self._apply_windows11_style()
 
         root.columnconfigure(0, weight=1)
@@ -129,6 +174,7 @@ class BeatMarkerApp:
         self.last_clip_folder = self.default_download_folder
         self._cute_frames = ["(=^.^=)", "(=^.^=)>", "<(=^.^=)", "(=^.^=)~"]
         self._anim_jobs = {"beat": None, "download": None, "clip": None}
+        self._marquee_running = {"beat": False, "download": False, "clip": False}
 
         self._build_beat_tab()
         self._build_download_tab()
@@ -150,6 +196,13 @@ class BeatMarkerApp:
         sys.stdout = self.app_console_redirector
         sys.stderr = self.app_console_redirector
 
+        # Auto-size the window to fit all tab content, then lock minimum size
+        self.root.update_idletasks()
+        req_w = max(self.root.winfo_reqwidth(), 680)
+        req_h = max(self.root.winfo_reqheight(), 480)
+        self.root.geometry(f"{req_w}x{req_h}")
+        self.root.minsize(req_w, req_h)
+
     def _apply_windows11_style(self):
         style = ttk.Style(self.root)
         for theme_name in ("vista", "xpnative"):
@@ -162,7 +215,7 @@ class BeatMarkerApp:
         style.configure("TButton", padding=(12, 6))
         style.configure("TEntry", padding=(6, 4))
         style.configure("TCombobox", padding=(6, 3))
-        style.configure("Horizontal.TProgressbar", thickness=10)
+        style.configure("Horizontal.TProgressbar", thickness=14)
         style.configure("Accent.TButton", font=("Segoe UI", 10, "bold"), padding=(14, 6))
 
     def _build_beat_tab(self):
@@ -173,33 +226,48 @@ class BeatMarkerApp:
         container.grid(row=0, column=0, sticky="nsew")
         container.columnconfigure(1, weight=1)
 
-        ttk.Label(container, text="Song:").grid(row=0, column=0, padx=8, pady=12, sticky="e")
+        ttk.Label(container, text="Input & Output", font=("Segoe UI", 11, "bold")).grid(row=0, column=0, columnspan=3, pady=(0, 10), sticky="w")
+        
+        lbl_song = ttk.Label(container, text="Song:")
+        lbl_song.grid(row=1, column=0, padx=8, pady=12, sticky="e")
+        ToolTip(lbl_song, "Select the audio file you want to process.")
+        
         self.input_entry = ttk.Entry(container)
-        self.input_entry.grid(row=0, column=1, padx=8, pady=12, sticky="we")
-        ttk.Button(container, text="Browse...", command=self.select_input).grid(row=0, column=2, padx=8, pady=12)
+        self.input_entry.grid(row=1, column=1, padx=8, pady=12, sticky="we")
+        ttk.Button(container, text="Browse...", command=self.select_input).grid(row=1, column=2, padx=8, pady=12)
 
-        ttk.Label(container, text="Save As:").grid(row=1, column=0, padx=8, pady=12, sticky="e")
+        lbl_save = ttk.Label(container, text="Save As:")
+        lbl_save.grid(row=2, column=0, padx=8, pady=12, sticky="e")
+        ToolTip(lbl_save, "Choose where to save the generated beat marker file.")
+        
         self.output_entry = ttk.Entry(container)
-        self.output_entry.grid(row=1, column=1, padx=8, pady=12, sticky="we")
-        ttk.Button(container, text="Browse...", command=self.select_output).grid(row=1, column=2, padx=8, pady=12)
+        self.output_entry.grid(row=2, column=1, padx=8, pady=12, sticky="we")
+        ttk.Button(container, text="Browse...", command=self.select_output).grid(row=2, column=2, padx=8, pady=12)
+
+        ttk.Separator(container, orient="horizontal").grid(row=3, column=0, columnspan=3, sticky="we", pady=15)
+
+        ttk.Label(container, text="Process", font=("Segoe UI", 11, "bold")).grid(row=4, column=0, columnspan=3, pady=(0, 10), sticky="w")
 
         self.process_button = ttk.Button(container, text="Generate Beat Markers", command=self.process, style="Accent.TButton")
-        self.process_button.grid(row=2, column=0, columnspan=3, padx=8, pady=24)
+        self.process_button.grid(row=5, column=0, columnspan=3, padx=8, pady=10)
+        ToolTip(self.process_button, "Start generating beat markers for the selected audio file.")
 
         self.progress_frame = ttk.Frame(container)
-        self.progress_frame.grid(row=3, column=0, columnspan=3, padx=8, pady=6, sticky="we")
+        self.progress_frame.grid(row=6, column=0, columnspan=3, padx=8, pady=6, sticky="we")
         self.progress_frame.columnconfigure(0, weight=1)
 
         self.progress = ttk.Progressbar(self.progress_frame, mode="indeterminate")
         self.progress.grid(row=0, column=0, sticky="we")
+        self.beat_pct_label = ttk.Label(self.progress_frame, text="", width=6, anchor="e", font=("Segoe UI", 9))
+        self.beat_pct_label.grid(row=0, column=1, padx=(8, 0))
         self.beat_anim_label = ttk.Label(self.progress_frame, text="", width=12, anchor="w")
-        self.beat_anim_label.grid(row=0, column=1, padx=(8, 0))
+        self.beat_anim_label.grid(row=0, column=2, padx=(4, 0))
 
         self.status_label = ttk.Label(container, text="Ready")
-        self.status_label.grid(row=4, column=0, columnspan=2, padx=8, pady=6, sticky="w")
+        self.status_label.grid(row=7, column=0, columnspan=2, padx=8, pady=6, sticky="w")
 
         self.open_folder_button = ttk.Button(container, text="Open Folder", command=self.open_output_folder, state=tk.DISABLED)
-        self.open_folder_button.grid(row=4, column=2, padx=8, pady=6, sticky="e")
+        self.open_folder_button.grid(row=7, column=2, padx=8, pady=6, sticky="e")
 
     def _build_download_tab(self):
         self.download_tab.columnconfigure(0, weight=1)
@@ -209,51 +277,89 @@ class BeatMarkerApp:
         container.grid(row=0, column=0, sticky="nsew")
         container.columnconfigure(1, weight=1)
 
-        ttk.Label(container, text="Video Link:").grid(row=0, column=0, padx=8, pady=12, sticky="e")
-        self.download_url_entry = ttk.Entry(container)
-        self.download_url_entry.grid(row=0, column=1, padx=8, pady=12, sticky="we")
+        ttk.Label(container, text="Media Source", font=("Segoe UI", 11, "bold")).grid(row=0, column=0, columnspan=3, pady=(0, 10), sticky="w")
 
-        ttk.Label(container, text="Target Folder:").grid(row=1, column=0, padx=8, pady=12, sticky="e")
+        lbl_link = ttk.Label(container, text="Video Link:")
+        lbl_link.grid(row=1, column=0, padx=8, pady=12, sticky="e")
+        ToolTip(lbl_link, "Paste the URL of the video you want to download.")
+        
+        self.download_url_entry = ttk.Entry(container)
+        self.download_url_entry.grid(row=1, column=1, padx=8, pady=12, sticky="we")
+
+        lbl_folder = ttk.Label(container, text="Target Folder:")
+        lbl_folder.grid(row=2, column=0, padx=8, pady=12, sticky="e")
+        ToolTip(lbl_folder, "Select the folder where the downloaded files will be saved.")
+        
         self.download_folder_label = ttk.Label(container, text=self.selected_download_folder, anchor="w")
-        self.download_folder_label.grid(row=1, column=1, padx=8, pady=12, sticky="we")
+        self.download_folder_label.grid(row=2, column=1, padx=8, pady=12, sticky="we")
         self.download_folder_button = ttk.Button(container, text="Choose Folder...", command=self.select_download_folder)
-        self.download_folder_button.grid(row=1, column=2, padx=8, pady=12)
+        self.download_folder_button.grid(row=2, column=2, padx=8, pady=12)
+
+        ttk.Separator(container, orient="horizontal").grid(row=3, column=0, columnspan=3, sticky="we", pady=15)
+
+        options_frame = ttk.Frame(container)
+        options_frame.grid(row=4, column=0, columnspan=3, sticky="we")
+        options_frame.columnconfigure(0, weight=1)
+        options_frame.columnconfigure(1, weight=0)
+        options_frame.columnconfigure(2, weight=1)
+
+        audio_frame = ttk.Frame(options_frame)
+        audio_frame.grid(row=0, column=0, sticky="nsew", padx=10)
+        ttk.Label(audio_frame, text="Audio Download", font=("Segoe UI", 11, "bold")).grid(row=0, column=0, pady=(0, 10), sticky="w")
 
         self.create_marker_var = tk.BooleanVar(value=False)
         self.create_marker_check = ttk.Checkbutton(
-            container,
+            audio_frame,
             text="Also create Beat Marker",
             variable=self.create_marker_var,
         )
-        self.create_marker_check.grid(row=2, column=1, padx=8, pady=12, sticky="w")
+        self.create_marker_check.grid(row=1, column=0, pady=5, sticky="w")
+        ToolTip(self.create_marker_check, "Automatically generate beat markers from the downloaded audio.")
 
-        btn_frame = ttk.Frame(container)
-        btn_frame.grid(row=3, column=0, columnspan=3, pady=24)
+        # Spacer to push button to bottom
+        audio_frame.rowconfigure(2, weight=1)
 
         self.download_audio_btn = ttk.Button(
-            btn_frame, text="Audio", command=lambda: self.download_media("flac"), style="Accent.TButton"
+            audio_frame, text="Download Audio", command=lambda: self.download_media("flac"), style="Accent.TButton"
         )
-        self.download_audio_btn.grid(row=0, column=0, padx=10)
+        self.download_audio_btn.grid(row=3, column=0, pady=(15, 0), sticky="w")
+        ToolTip(self.download_audio_btn, "Download the audio as a high quality FLAC file.")
+
+        ttk.Separator(options_frame, orient="vertical").grid(row=0, column=1, sticky="ns", padx=5)
+
+        video_frame = ttk.Frame(options_frame)
+        video_frame.grid(row=0, column=2, sticky="nsew", padx=10)
+        ttk.Label(video_frame, text="Video Download", font=("Segoe UI", 11, "bold")).grid(row=0, column=0, pady=(0, 10), sticky="w")
+
+        ttk.Label(video_frame, text="Download the best available\nvideo quality with audio.", justify="left").grid(row=1, column=0, pady=5, sticky="w")
+
+        # Spacer to push button to bottom (mirrors audio_frame)
+        video_frame.rowconfigure(2, weight=1)
 
         self.download_video_btn = ttk.Button(
-            btn_frame, text="Video", command=lambda: self.download_media("mp4"), style="Accent.TButton"
+            video_frame, text="Download Video", command=lambda: self.download_media("mp4"), style="Accent.TButton"
         )
-        self.download_video_btn.grid(row=0, column=1, padx=10)
+        self.download_video_btn.grid(row=3, column=0, pady=(15, 0), sticky="w")
+        ToolTip(self.download_video_btn, "Download the video as an MP4 file.")
+
+        ttk.Separator(container, orient="horizontal").grid(row=5, column=0, columnspan=3, sticky="we", pady=15)
 
         self.download_progress_frame = ttk.Frame(container)
-        self.download_progress_frame.grid(row=4, column=0, columnspan=3, padx=8, pady=6, sticky="we")
+        self.download_progress_frame.grid(row=6, column=0, columnspan=3, padx=8, pady=6, sticky="we")
         self.download_progress_frame.columnconfigure(0, weight=1)
 
         self.download_progress = ttk.Progressbar(self.download_progress_frame, mode="indeterminate")
         self.download_progress.grid(row=0, column=0, sticky="we")
+        self.download_pct_label = ttk.Label(self.download_progress_frame, text="", width=6, anchor="e", font=("Segoe UI", 9))
+        self.download_pct_label.grid(row=0, column=1, padx=(8, 0))
         self.download_anim_label = ttk.Label(self.download_progress_frame, text="", width=12, anchor="w")
-        self.download_anim_label.grid(row=0, column=1, padx=(8, 0))
+        self.download_anim_label.grid(row=0, column=2, padx=(4, 0))
 
         self.download_status_label = ttk.Label(container, text="Ready")
-        self.download_status_label.grid(row=5, column=0, columnspan=2, padx=8, pady=6, sticky="w")
+        self.download_status_label.grid(row=7, column=0, columnspan=2, padx=8, pady=6, sticky="w")
 
         self.open_download_folder_button = ttk.Button(container, text="Open Folder", command=self.open_download_folder, state=tk.DISABLED)
-        self.open_download_folder_button.grid(row=5, column=2, padx=8, pady=6, sticky="e")
+        self.open_download_folder_button.grid(row=7, column=2, padx=8, pady=6, sticky="e")
 
     def _build_clip_tab(self):
         self.clip_tab.columnconfigure(0, weight=1)
@@ -262,60 +368,91 @@ class BeatMarkerApp:
         container = ttk.Frame(self.clip_tab, padding=20)
         container.grid(row=0, column=0, sticky="nsew")
         container.columnconfigure(1, weight=1)
-        container.rowconfigure(10, weight=1)
 
-        ttk.Label(container, text="Video Link:").grid(row=0, column=0, padx=8, pady=6, sticky="e")
+        ttk.Label(container, text="Clip Source", font=("Segoe UI", 11, "bold")).grid(row=0, column=0, columnspan=3, pady=(0, 10), sticky="w")
+
+        lbl_link = ttk.Label(container, text="Video Link:")
+        lbl_link.grid(row=1, column=0, padx=8, pady=6, sticky="e")
+        ToolTip(lbl_link, "URL of the video to extract clips from.")
         self.clip_url_entry = ttk.Entry(container)
-        self.clip_url_entry.grid(row=0, column=1, padx=8, pady=6, sticky="we")
+        self.clip_url_entry.grid(row=1, column=1, padx=8, pady=6, sticky="we")
 
-        ttk.Label(container, text="Output Folder:").grid(row=1, column=0, padx=8, pady=6, sticky="e")
+        lbl_folder = ttk.Label(container, text="Output Folder:")
+        lbl_folder.grid(row=2, column=0, padx=8, pady=6, sticky="e")
+        ToolTip(lbl_folder, "Where to save the extracted video clips.")
+        
         self.clip_folder_label = ttk.Label(container, text=self.selected_clip_folder, anchor="w")
-        self.clip_folder_label.grid(row=1, column=1, padx=8, pady=6, sticky="we")
+        self.clip_folder_label.grid(row=2, column=1, padx=8, pady=6, sticky="we")
         self.clip_folder_button = ttk.Button(container, text="Choose Folder...", command=self.select_clip_folder)
-        self.clip_folder_button.grid(row=1, column=2, padx=8, pady=6)
+        self.clip_folder_button.grid(row=2, column=2, padx=8, pady=6)
 
-        settings_frame = ttk.LabelFrame(container, text="Advanced Settings (Optional)", padding=10)
-        settings_frame.grid(row=2, column=0, columnspan=3, padx=8, pady=10, sticky="we")
+        ttk.Separator(container, orient="horizontal").grid(row=3, column=0, columnspan=3, sticky="we", pady=15)
+
+        ttk.Label(container, text="Extraction Settings", font=("Segoe UI", 11, "bold")).grid(row=4, column=0, columnspan=3, pady=(0, 5), sticky="w")
+
+        settings_frame = ttk.Frame(container)
+        settings_frame.grid(row=5, column=0, columnspan=3, padx=8, pady=5, sticky="we")
         for i in range(4):
             settings_frame.columnconfigure(i, weight=1)
 
-        ttk.Label(settings_frame, text="Scene Threshold:").grid(row=0, column=0, padx=8, pady=4, sticky="e")
+        lbl_thresh = ttk.Label(settings_frame, text="Scene Threshold:")
+        lbl_thresh.grid(row=0, column=0, padx=8, pady=4, sticky="e")
+        ToolTip(lbl_thresh, "Lower values detect more scenes, higher values detect fewer. Default is 3.0.")
+        
         self.clip_threshold_entry = ttk.Entry(settings_frame, width=10)
         self.clip_threshold_entry.insert(0, "3.0")
         self.clip_threshold_entry.grid(row=0, column=1, padx=8, pady=4, sticky="w")
 
-        ttk.Label(settings_frame, text="Min Length (s):").grid(row=0, column=2, padx=8, pady=4, sticky="e")
+        lbl_minlen = ttk.Label(settings_frame, text="Min Length (s):")
+        lbl_minlen.grid(row=0, column=2, padx=8, pady=4, sticky="e")
+        ToolTip(lbl_minlen, "Minimum length for a clip in seconds. Default is 3.0.")
+        
         self.clip_min_length_entry = ttk.Entry(settings_frame, width=10)
         self.clip_min_length_entry.insert(0, "3.0")
         self.clip_min_length_entry.grid(row=0, column=3, padx=8, pady=4, sticky="w")
 
-        ttk.Label(settings_frame, text="Max Clips:").grid(row=1, column=0, padx=8, pady=4, sticky="e")
+        lbl_max = ttk.Label(settings_frame, text="Max Clips:")
+        lbl_max.grid(row=1, column=0, padx=8, pady=4, sticky="e")
+        ToolTip(lbl_max, "Maximum number of clips to extract. Default is 30.")
+        
         self.clip_max_clips_entry = ttk.Entry(settings_frame, width=10)
         self.clip_max_clips_entry.insert(0, "30")
         self.clip_max_clips_entry.grid(row=1, column=1, padx=8, pady=4, sticky="w")
 
-        ttk.Label(settings_frame, text="Frame Skip:").grid(row=1, column=2, padx=8, pady=4, sticky="e")
+        lbl_skip = ttk.Label(settings_frame, text="Frame Skip:")
+        lbl_skip.grid(row=1, column=2, padx=8, pady=4, sticky="e")
+        ToolTip(lbl_skip, "Number of frames to skip during scene detection. Higher values are faster but less accurate. Default is 1.")
+        
         self.clip_frame_skip_entry = ttk.Entry(settings_frame, width=10)
         self.clip_frame_skip_entry.insert(0, "1")
         self.clip_frame_skip_entry.grid(row=1, column=3, padx=8, pady=4, sticky="w")
 
+        ttk.Separator(container, orient="horizontal").grid(row=6, column=0, columnspan=3, sticky="we", pady=15)
+
+        ttk.Label(container, text="Process", font=("Segoe UI", 11, "bold")).grid(row=7, column=0, columnspan=3, pady=(0, 5), sticky="w")
+
         self.clip_button = ttk.Button(container, text="Extract Clips", command=self.extract_video_clips, style="Accent.TButton")
-        self.clip_button.grid(row=6, column=0, columnspan=3, padx=8, pady=16)
+        self.clip_button.grid(row=8, column=0, columnspan=3, padx=8, pady=10)
+        ToolTip(self.clip_button, "Start extracting scenes from the video.")
 
         self.clip_progress_frame = ttk.Frame(container)
-        self.clip_progress_frame.grid(row=7, column=0, columnspan=3, padx=8, pady=6, sticky="we")
+        self.clip_progress_frame.grid(row=9, column=0, columnspan=3, padx=8, pady=6, sticky="we")
         self.clip_progress_frame.columnconfigure(0, weight=1)
 
         self.clip_progress = ttk.Progressbar(self.clip_progress_frame, mode="indeterminate")
         self.clip_progress.grid(row=0, column=0, sticky="we")
+        self.clip_pct_label = ttk.Label(self.clip_progress_frame, text="", width=6, anchor="e", font=("Segoe UI", 9))
+        self.clip_pct_label.grid(row=0, column=1, padx=(8, 0))
         self.clip_anim_label = ttk.Label(self.clip_progress_frame, text="", width=12, anchor="w")
-        self.clip_anim_label.grid(row=0, column=1, padx=(8, 0))
+        self.clip_anim_label.grid(row=0, column=2, padx=(4, 0))
 
         self.clip_status_label = ttk.Label(container, text="Ready")
-        self.clip_status_label.grid(row=8, column=0, columnspan=2, padx=8, pady=6, sticky="w")
+        self.clip_status_label.grid(row=10, column=0, columnspan=2, padx=8, pady=6, sticky="w")
+        
+        container.rowconfigure(10, weight=1)
 
         self.open_clip_folder_button = ttk.Button(container, text="Open Folder", command=self.open_clip_folder, state=tk.DISABLED)
-        self.open_clip_folder_button.grid(row=8, column=2, padx=8, pady=6, sticky="e")
+        self.open_clip_folder_button.grid(row=10, column=2, padx=8, pady=6, sticky="e")
 
     def _toggle_console(self):
         if self.console_visible:
@@ -388,6 +525,54 @@ class BeatMarkerApp:
         elif key == "clip":
             self.clip_anim_label.config(text="")
 
+    # ── Marquee progress helpers ─────────────────────────────────────────────
+
+    def _get_key_for_bar(self, progress_bar):
+        """Return the animation key for a given progress bar widget."""
+        if progress_bar is self.download_progress:
+            return "download"
+        if progress_bar is self.clip_progress:
+            return "clip"
+        if progress_bar is self.progress:
+            return "beat"
+        return None
+
+    def _get_bar(self, key):
+        """Return the progress bar widget for a given animation key."""
+        return {"beat": self.progress, "download": self.download_progress, "clip": self.clip_progress}[key]
+
+    def _start_marquee(self, key):
+        """Start a smooth one-directional marquee (no bounce) on the progress bar."""
+        self._stop_marquee(key)  # cancel any running marquee first
+        bar = self._get_bar(key)
+        bar.config(mode="determinate", maximum=100, value=0)
+        self._marquee_running[key] = True
+        self._do_marquee(key, 0)
+
+    def _do_marquee(self, key, value):
+        if not self._marquee_running.get(key):
+            return
+        next_val = (value + 2) % 101  # 0 → 100, then wrap back to 0
+        self._get_bar(key).config(value=next_val)
+        job = self.root.after(25, lambda v=next_val: self._do_marquee(key, v))
+        self._anim_jobs[f"mq_{key}"] = job
+
+    def _stop_marquee(self, key):
+        """Stop the marquee and reset the bar to 0."""
+        self._marquee_running[key] = False
+        job = self._anim_jobs.pop(f"mq_{key}", None)
+        if job:
+            self.root.after_cancel(job)
+        self._get_bar(key).config(value=0)
+
+    def _get_pct_label_for_bar(self, progress_bar):
+        """Return the percentage label that belongs to the given progress_bar."""
+        if progress_bar is self.download_progress:
+            return self.download_pct_label
+        if progress_bar is self.clip_progress:
+            return self.clip_pct_label
+        return None
+
     def _yt_dlp_progress_hook(self, d, progress_bar):
         if d['status'] == 'downloading':
             try:
@@ -395,12 +580,27 @@ class BeatMarkerApp:
                 downloaded = d.get('downloaded_bytes', 0)
                 if total_bytes and total_bytes > 0:
                     percentage = (downloaded / total_bytes) * 100
-                    self.root.after(0, lambda: progress_bar.config(mode="determinate", maximum=100, value=percentage))
+                    pct_lbl = self._get_pct_label_for_bar(progress_bar)
+                    key = self._get_key_for_bar(progress_bar)
+                    def _set_real_progress(p=percentage, lbl=pct_lbl, k=key):
+                        # Pause the marquee and show real progress
+                        if k:
+                            self._marquee_running[k] = False
+                        progress_bar.config(mode="determinate", maximum=100, value=p)
+                        if lbl:
+                            lbl.config(text=f"{p:.0f}%")
+                    self.root.after(0, _set_real_progress)
             except Exception:
                 pass
         elif d['status'] == 'finished':
-            self.root.after(0, lambda: progress_bar.config(mode="indeterminate"))
-            self.root.after(0, lambda: progress_bar.start(10))
+            pct_lbl = self._get_pct_label_for_bar(progress_bar)
+            key = self._get_key_for_bar(progress_bar)
+            def _restart_marquee(lbl=pct_lbl, k=key):
+                if lbl:
+                    lbl.config(text="")
+                if k:
+                    self._start_marquee(k)  # resume marquee during post-processing
+            self.root.after(0, _restart_marquee)
 
     def process(self):
         input_path = self.input_entry.get()
@@ -422,7 +622,7 @@ class BeatMarkerApp:
         self.status_label.config(text="Processing...")
         self.process_button.config(state=tk.DISABLED)
         self.open_folder_button.config(state=tk.DISABLED)
-        self.progress.start(10)
+        self._start_marquee("beat")
         self._start_cute_animation("beat", self.beat_anim_label)
         self.root.update()
 
@@ -437,7 +637,7 @@ class BeatMarkerApp:
             self.root.after(0, lambda: self._on_finish())
 
     def _on_done(self, output_path):
-        self.progress.stop()
+        self._stop_marquee("beat")
         self._stop_cute_animation("beat")
         self.status_label.config(text=f"Done! Saved: {output_path}")
         self.process_button.config(state=tk.NORMAL)
@@ -445,7 +645,7 @@ class BeatMarkerApp:
         self.selected_output = output_path
 
     def _on_finish(self):
-        self.progress.stop()
+        self._stop_marquee("beat")
         self._stop_cute_animation("beat")
         self.process_button.config(state=tk.NORMAL)
 
@@ -547,8 +747,7 @@ class BeatMarkerApp:
         self.clip_status_label.config(text="Downloading video...")
         self.clip_button.config(state=tk.DISABLED)
         self.open_clip_folder_button.config(state=tk.DISABLED)
-        self.clip_progress.config(mode="indeterminate")
-        self.clip_progress.start(10)
+        self._start_marquee("clip")
         self._start_cute_animation("clip", self.clip_anim_label)
         self.root.update()
 
@@ -567,8 +766,7 @@ class BeatMarkerApp:
         try:
             self._download_clip_source(url, input_highres)
             
-            self.root.after(0, lambda: self.clip_progress.config(mode="indeterminate"))
-            self.root.after(0, lambda: self.clip_progress.start(10))
+            self.root.after(0, lambda: self._start_marquee("clip"))
             self.root.after(0, lambda: self.clip_status_label.config(text="Creating proxy for analysis..."))
             self._create_proxy(input_highres, input_proxy)
 
@@ -676,7 +874,7 @@ class BeatMarkerApp:
         )
 
     def _set_clip_progress_determinate(self, maximum):
-        self.clip_progress.stop()
+        self._stop_marquee("clip")
         self.clip_progress.config(mode="determinate", maximum=max(maximum, 1), value=0)
 
     def _safe_remove_file(self, file_path):
@@ -690,8 +888,7 @@ class BeatMarkerApp:
             self.root.after(0, lambda message=warning_message: self.clip_status_label.config(text=message))
 
     def _on_clip_done(self, output_folder, clips_created, scene_count):
-        self.clip_progress.stop()
-        self.clip_progress.config(mode="indeterminate", value=0)
+        self._stop_marquee("clip")
         self._stop_cute_animation("clip")
         self.clip_status_label.config(text=f"Done! {clips_created} clips saved from {scene_count} scenes.")
         self.clip_button.config(state=tk.NORMAL)
@@ -699,8 +896,7 @@ class BeatMarkerApp:
         self.last_clip_folder = output_folder
 
     def _on_clip_finish(self):
-        self.clip_progress.stop()
-        self.clip_progress.config(mode="indeterminate", value=0)
+        self._stop_marquee("clip")
         self._stop_cute_animation("clip")
         self.clip_button.config(state=tk.NORMAL)
 
@@ -730,7 +926,7 @@ class BeatMarkerApp:
         self.download_audio_btn.config(state=tk.DISABLED)
         self.download_video_btn.config(state=tk.DISABLED)
         self.open_download_folder_button.config(state=tk.DISABLED)
-        self.download_progress.start(10)
+        self._start_marquee("download")
         self._start_cute_animation("download", self.download_anim_label)
         self.root.update()
 
@@ -753,7 +949,8 @@ class BeatMarkerApp:
             self.root.after(0, lambda: self._on_download_finish())
 
     def _on_download_done(self, output_path, marker_path=None):
-        self.download_progress.stop()
+        self._stop_marquee("download")
+        self.download_pct_label.config(text="")
         self._stop_cute_animation("download")
         if marker_path:
             self.download_status_label.config(text=f"Done! Saved: {output_path} | Marker: {marker_path}")
@@ -766,7 +963,8 @@ class BeatMarkerApp:
         self.selected_download_folder = self.default_download_folder
 
     def _on_download_finish(self):
-        self.download_progress.stop()
+        self._stop_marquee("download")
+        self.download_pct_label.config(text="")
         self._stop_cute_animation("download")
         self.download_audio_btn.config(state=tk.NORMAL)
         self.download_video_btn.config(state=tk.NORMAL)

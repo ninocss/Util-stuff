@@ -12,6 +12,11 @@ Wichtiges
 - Der Tab `Video Clips` benötigt zusätzlich `scenedetect` für die Scene-Erkennung.
 
 Schnellstart (Windows)
+---------------------
+Unter Releases findet man die aktuelle .exe datei. Es ist eine portable Version, die keine Installation benötigt.
+
+
+Selbst bauen (Windows)
 ----------------------
 1. Virtuelle Umgebung erstellen (optional empfohlen):
 
@@ -48,5 +53,3 @@ Anpassungen
 Lizenz & Haftung
 ----------------
 Nutze das Tool verantwortungsvoll. Für das Herunterladen von Inhalten richte dich nach den jeweiligen Plattformbedingungen und Urheberrechtsgesetzen.
-
-Viel Spaß!
