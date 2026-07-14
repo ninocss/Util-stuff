@@ -103,13 +103,16 @@ class BeatMarkerApp:
     def __init__(self, root):
         self.root = root
         root.title("Utility")
+        root.geometry("800x600")
+        root.minsize(700, 500)
         self._apply_windows11_style()
 
         root.columnconfigure(0, weight=1)
         root.rowconfigure(0, weight=1)
+        root.rowconfigure(2, weight=0)
 
         self.notebook = ttk.Notebook(root)
-        self.notebook.grid(row=0, column=0, sticky="nsew")
+        self.notebook.grid(row=0, column=0, sticky="nsew", padx=10, pady=(10, 0))
 
         self.beat_tab = ttk.Frame(self.notebook, padding=12)
         self.download_tab = ttk.Frame(self.notebook, padding=12)
@@ -126,11 +129,26 @@ class BeatMarkerApp:
         self.last_clip_folder = self.default_download_folder
         self._cute_frames = ["(=^.^=)", "(=^.^=)>", "<(=^.^=)", "(=^.^=)~"]
         self._anim_jobs = {"beat": None, "download": None, "clip": None}
-        self.console_visible = True
 
         self._build_beat_tab()
         self._build_download_tab()
         self._build_clip_tab()
+
+        self.console_visible = False
+        self.console_toggle_button = ttk.Button(
+            root, text="▼ Show App Console", command=self._toggle_console, style="Accent.TButton"
+        )
+        self.console_toggle_button.grid(row=1, column=0, sticky="ew", padx=10, pady=(5, 5))
+
+        self.app_console = scrolledtext.ScrolledText(
+            root, height=12, state="disabled", font=("Consolas", 9), wrap="word", bg="#1e1e1e", fg="#cccccc", borderwidth=0
+        )
+        self.app_console.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        self.app_console.grid_remove()
+
+        self.app_console_redirector = ConsoleRedirector(self.app_console, self.root)
+        sys.stdout = self.app_console_redirector
+        sys.stderr = self.app_console_redirector
 
     def _apply_windows11_style(self):
         style = ttk.Style(self.root)
@@ -148,37 +166,28 @@ class BeatMarkerApp:
         style.configure("Accent.TButton", font=("Segoe UI", 10, "bold"), padding=(14, 6))
 
     def _build_beat_tab(self):
-        for i in range(3):
-            self.beat_tab.columnconfigure(i, weight=1)
+        self.beat_tab.columnconfigure(0, weight=1)
+        self.beat_tab.rowconfigure(0, weight=1)
+        
+        container = ttk.Frame(self.beat_tab, padding=20)
+        container.grid(row=0, column=0, sticky="nsew")
+        container.columnconfigure(1, weight=1)
 
-        ttk.Label(self.beat_tab, text="Song:").grid(row=0, column=0, padx=8, pady=8, sticky="e")
-        self.input_entry = ttk.Entry(self.beat_tab, width=60)
-        self.input_entry.grid(row=0, column=1, padx=8, pady=8, sticky="we")
-        ttk.Button(self.beat_tab, text="Search", command=self.select_input).grid(row=0, column=2, padx=8, pady=8)
+        ttk.Label(container, text="Song:").grid(row=0, column=0, padx=8, pady=12, sticky="e")
+        self.input_entry = ttk.Entry(container)
+        self.input_entry.grid(row=0, column=1, padx=8, pady=12, sticky="we")
+        ttk.Button(container, text="Browse...", command=self.select_input).grid(row=0, column=2, padx=8, pady=12)
 
-        ttk.Label(self.beat_tab, text="Click Duration (s):").grid(row=1, column=0, padx=8, pady=4, sticky="e")
-        self.duration_entry = ttk.Entry(self.beat_tab, width=12)
-        self.duration_entry.insert(0, "0.001")
-        self.duration_entry.grid(row=1, column=1, padx=8, pady=4, sticky="w")
+        ttk.Label(container, text="Save As:").grid(row=1, column=0, padx=8, pady=12, sticky="e")
+        self.output_entry = ttk.Entry(container)
+        self.output_entry.grid(row=1, column=1, padx=8, pady=12, sticky="we")
+        ttk.Button(container, text="Browse...", command=self.select_output).grid(row=1, column=2, padx=8, pady=12)
 
-        ttk.Label(self.beat_tab, text="Amplitude (0-1):").grid(row=2, column=0, padx=8, pady=4, sticky="e")
-        self.amplitude_entry = ttk.Entry(self.beat_tab, width=12)
-        self.amplitude_entry.insert(0, "0.99")
-        self.amplitude_entry.grid(row=2, column=1, padx=8, pady=4, sticky="w")
+        self.process_button = ttk.Button(container, text="Generate Beat Markers", command=self.process, style="Accent.TButton")
+        self.process_button.grid(row=2, column=0, columnspan=3, padx=8, pady=24)
 
-        ttk.Label(self.beat_tab, text="Format:").grid(row=3, column=0, padx=8, pady=4, sticky="e")
-        self.format_combo = ttk.Combobox(self.beat_tab, values=["flac", "wav"], state="readonly", width=10)
-        self.format_combo.set("flac")
-        self.format_combo.grid(row=3, column=1, padx=8, pady=4, sticky="w")
-
-        self.output_button = ttk.Button(self.beat_tab, text="Save As...", command=self.select_output)
-        self.output_button.grid(row=3, column=2, padx=8, pady=4)
-
-        self.process_button = ttk.Button(self.beat_tab, text="Generate Beat Markers", command=self.process, style="Accent.TButton")
-        self.process_button.grid(row=4, column=1, padx=8, pady=12)
-
-        self.progress_frame = ttk.Frame(self.beat_tab)
-        self.progress_frame.grid(row=5, column=0, columnspan=3, padx=8, pady=6, sticky="we")
+        self.progress_frame = ttk.Frame(container)
+        self.progress_frame.grid(row=3, column=0, columnspan=3, padx=8, pady=6, sticky="we")
         self.progress_frame.columnconfigure(0, weight=1)
 
         self.progress = ttk.Progressbar(self.progress_frame, mode="indeterminate")
@@ -186,56 +195,52 @@ class BeatMarkerApp:
         self.beat_anim_label = ttk.Label(self.progress_frame, text="", width=12, anchor="w")
         self.beat_anim_label.grid(row=0, column=1, padx=(8, 0))
 
-        self.status_label = ttk.Label(self.beat_tab, text="Ready")
-        self.status_label.grid(row=6, column=0, columnspan=2, padx=8, pady=6, sticky="w")
+        self.status_label = ttk.Label(container, text="Ready")
+        self.status_label.grid(row=4, column=0, columnspan=2, padx=8, pady=6, sticky="w")
 
-        self.open_folder_button = ttk.Button(self.beat_tab, text="Open Folder", command=self.open_output_folder, state=tk.DISABLED)
-        self.open_folder_button.grid(row=6, column=2, padx=8, pady=6, sticky="e")
+        self.open_folder_button = ttk.Button(container, text="Open Folder", command=self.open_output_folder, state=tk.DISABLED)
+        self.open_folder_button.grid(row=4, column=2, padx=8, pady=6, sticky="e")
 
     def _build_download_tab(self):
-        for i in range(3):
-            self.download_tab.columnconfigure(i, weight=1)
+        self.download_tab.columnconfigure(0, weight=1)
+        self.download_tab.rowconfigure(0, weight=1)
 
-        ttk.Label(self.download_tab, text="Video Link:").grid(row=0, column=0, padx=8, pady=8, sticky="e")
-        self.download_url_entry = ttk.Entry(self.download_tab, width=60)
-        self.download_url_entry.grid(row=0, column=1, padx=8, pady=8, sticky="we")
+        container = ttk.Frame(self.download_tab, padding=20)
+        container.grid(row=0, column=0, sticky="nsew")
+        container.columnconfigure(1, weight=1)
 
-        ttk.Label(self.download_tab, text="Edit Preset:").grid(row=1, column=0, padx=8, pady=4, sticky="e")
-        self.download_preset_combo = ttk.Combobox(
-            self.download_tab,
-            values=[
-                "FLAC (lossless)",
-                "WAV (uncompressed)",
-                "M4A (high quality)",
-                "MP3 320k",
-                "Best original",
-            ],
-            state="readonly",
-            width=18,
-        )
-        self.download_preset_combo.set("FLAC (lossless)")
-        self.download_preset_combo.grid(row=1, column=1, padx=8, pady=4, sticky="w")
+        ttk.Label(container, text="Video Link:").grid(row=0, column=0, padx=8, pady=12, sticky="e")
+        self.download_url_entry = ttk.Entry(container)
+        self.download_url_entry.grid(row=0, column=1, padx=8, pady=12, sticky="we")
 
-        self.download_folder_button = ttk.Button(self.download_tab, text="Target Folder...", command=self.select_download_folder)
-        self.download_folder_button.grid(row=1, column=2, padx=8, pady=4)
+        ttk.Label(container, text="Target Folder:").grid(row=1, column=0, padx=8, pady=12, sticky="e")
+        self.download_folder_label = ttk.Label(container, text=self.selected_download_folder, anchor="w")
+        self.download_folder_label.grid(row=1, column=1, padx=8, pady=12, sticky="we")
+        self.download_folder_button = ttk.Button(container, text="Choose Folder...", command=self.select_download_folder)
+        self.download_folder_button.grid(row=1, column=2, padx=8, pady=12)
 
         self.create_marker_var = tk.BooleanVar(value=False)
         self.create_marker_check = ttk.Checkbutton(
-            self.download_tab,
+            container,
             text="Also create Beat Marker",
             variable=self.create_marker_var,
         )
-        self.create_marker_check.grid(row=2, column=0, columnspan=2, padx=8, pady=4, sticky="w")
+        self.create_marker_check.grid(row=2, column=1, padx=8, pady=12, sticky="w")
 
-        ttk.Label(self.download_tab, text="Marker Format:").grid(row=2, column=2, padx=8, pady=4, sticky="e")
-        self.marker_format_combo = ttk.Combobox(self.download_tab, values=["flac", "wav"], state="readonly", width=10)
-        self.marker_format_combo.set("flac")
-        self.marker_format_combo.grid(row=2, column=2, padx=(110, 8), pady=4, sticky="w")
+        btn_frame = ttk.Frame(container)
+        btn_frame.grid(row=3, column=0, columnspan=3, pady=24)
 
-        self.download_button = ttk.Button(self.download_tab, text="Download Audio", command=self.download_audio, style="Accent.TButton")
-        self.download_button.grid(row=3, column=1, padx=8, pady=12)
+        self.download_audio_btn = ttk.Button(
+            btn_frame, text="Audio", command=lambda: self.download_media("flac"), style="Accent.TButton"
+        )
+        self.download_audio_btn.grid(row=0, column=0, padx=10)
 
-        self.download_progress_frame = ttk.Frame(self.download_tab)
+        self.download_video_btn = ttk.Button(
+            btn_frame, text="Video", command=lambda: self.download_media("mp4"), style="Accent.TButton"
+        )
+        self.download_video_btn.grid(row=0, column=1, padx=10)
+
+        self.download_progress_frame = ttk.Frame(container)
         self.download_progress_frame.grid(row=4, column=0, columnspan=3, padx=8, pady=6, sticky="we")
         self.download_progress_frame.columnconfigure(0, weight=1)
 
@@ -244,50 +249,60 @@ class BeatMarkerApp:
         self.download_anim_label = ttk.Label(self.download_progress_frame, text="", width=12, anchor="w")
         self.download_anim_label.grid(row=0, column=1, padx=(8, 0))
 
-        self.download_status_label = ttk.Label(self.download_tab, text="Ready")
+        self.download_status_label = ttk.Label(container, text="Ready")
         self.download_status_label.grid(row=5, column=0, columnspan=2, padx=8, pady=6, sticky="w")
 
-        self.open_download_folder_button = ttk.Button(self.download_tab, text="Open Folder", command=self.open_download_folder, state=tk.DISABLED)
+        self.open_download_folder_button = ttk.Button(container, text="Open Folder", command=self.open_download_folder, state=tk.DISABLED)
         self.open_download_folder_button.grid(row=5, column=2, padx=8, pady=6, sticky="e")
 
     def _build_clip_tab(self):
-        for i in range(3):
-            self.clip_tab.columnconfigure(i, weight=1)
+        self.clip_tab.columnconfigure(0, weight=1)
+        self.clip_tab.rowconfigure(0, weight=1)
 
-        ttk.Label(self.clip_tab, text="Video Link:").grid(row=0, column=0, padx=8, pady=8, sticky="e")
-        self.clip_url_entry = ttk.Entry(self.clip_tab, width=60)
-        self.clip_url_entry.grid(row=0, column=1, padx=8, pady=8, sticky="we")
+        container = ttk.Frame(self.clip_tab, padding=20)
+        container.grid(row=0, column=0, sticky="nsew")
+        container.columnconfigure(1, weight=1)
+        container.rowconfigure(10, weight=1)
 
-        ttk.Label(self.clip_tab, text="Output Folder:").grid(row=1, column=0, padx=8, pady=4, sticky="e")
-        self.clip_folder_label = ttk.Label(self.clip_tab, text=self.selected_clip_folder, anchor="w")
-        self.clip_folder_label.grid(row=1, column=1, padx=8, pady=4, sticky="we")
-        self.clip_folder_button = ttk.Button(self.clip_tab, text="Choose Folder...", command=self.select_clip_folder)
-        self.clip_folder_button.grid(row=1, column=2, padx=8, pady=4)
+        ttk.Label(container, text="Video Link:").grid(row=0, column=0, padx=8, pady=6, sticky="e")
+        self.clip_url_entry = ttk.Entry(container)
+        self.clip_url_entry.grid(row=0, column=1, padx=8, pady=6, sticky="we")
 
-        ttk.Label(self.clip_tab, text="Scene Threshold:").grid(row=2, column=0, padx=8, pady=4, sticky="e")
-        self.clip_threshold_entry = ttk.Entry(self.clip_tab, width=12)
+        ttk.Label(container, text="Output Folder:").grid(row=1, column=0, padx=8, pady=6, sticky="e")
+        self.clip_folder_label = ttk.Label(container, text=self.selected_clip_folder, anchor="w")
+        self.clip_folder_label.grid(row=1, column=1, padx=8, pady=6, sticky="we")
+        self.clip_folder_button = ttk.Button(container, text="Choose Folder...", command=self.select_clip_folder)
+        self.clip_folder_button.grid(row=1, column=2, padx=8, pady=6)
+
+        settings_frame = ttk.LabelFrame(container, text="Advanced Settings (Optional)", padding=10)
+        settings_frame.grid(row=2, column=0, columnspan=3, padx=8, pady=10, sticky="we")
+        for i in range(4):
+            settings_frame.columnconfigure(i, weight=1)
+
+        ttk.Label(settings_frame, text="Scene Threshold:").grid(row=0, column=0, padx=8, pady=4, sticky="e")
+        self.clip_threshold_entry = ttk.Entry(settings_frame, width=10)
         self.clip_threshold_entry.insert(0, "3.0")
-        self.clip_threshold_entry.grid(row=2, column=1, padx=8, pady=4, sticky="w")
+        self.clip_threshold_entry.grid(row=0, column=1, padx=8, pady=4, sticky="w")
 
-        ttk.Label(self.clip_tab, text="Minimum Clip Length (s):").grid(row=3, column=0, padx=8, pady=4, sticky="e")
-        self.clip_min_length_entry = ttk.Entry(self.clip_tab, width=12)
+        ttk.Label(settings_frame, text="Min Length (s):").grid(row=0, column=2, padx=8, pady=4, sticky="e")
+        self.clip_min_length_entry = ttk.Entry(settings_frame, width=10)
         self.clip_min_length_entry.insert(0, "3.0")
-        self.clip_min_length_entry.grid(row=3, column=1, padx=8, pady=4, sticky="w")
+        self.clip_min_length_entry.grid(row=0, column=3, padx=8, pady=4, sticky="w")
 
-        ttk.Label(self.clip_tab, text="Maximum Clips:").grid(row=4, column=0, padx=8, pady=4, sticky="e")
-        self.clip_max_clips_entry = ttk.Entry(self.clip_tab, width=12)
+        ttk.Label(settings_frame, text="Max Clips:").grid(row=1, column=0, padx=8, pady=4, sticky="e")
+        self.clip_max_clips_entry = ttk.Entry(settings_frame, width=10)
         self.clip_max_clips_entry.insert(0, "30")
-        self.clip_max_clips_entry.grid(row=4, column=1, padx=8, pady=4, sticky="w")
+        self.clip_max_clips_entry.grid(row=1, column=1, padx=8, pady=4, sticky="w")
 
-        ttk.Label(self.clip_tab, text="Frame Skip:").grid(row=5, column=0, padx=8, pady=4, sticky="e")
-        self.clip_frame_skip_entry = ttk.Entry(self.clip_tab, width=12)
+        ttk.Label(settings_frame, text="Frame Skip:").grid(row=1, column=2, padx=8, pady=4, sticky="e")
+        self.clip_frame_skip_entry = ttk.Entry(settings_frame, width=10)
         self.clip_frame_skip_entry.insert(0, "1")
-        self.clip_frame_skip_entry.grid(row=5, column=1, padx=8, pady=4, sticky="w")
+        self.clip_frame_skip_entry.grid(row=1, column=3, padx=8, pady=4, sticky="w")
 
-        self.clip_button = ttk.Button(self.clip_tab, text="Extract Clips", command=self.extract_video_clips, style="Accent.TButton")
-        self.clip_button.grid(row=6, column=1, padx=8, pady=12)
+        self.clip_button = ttk.Button(container, text="Extract Clips", command=self.extract_video_clips, style="Accent.TButton")
+        self.clip_button.grid(row=6, column=0, columnspan=3, padx=8, pady=16)
 
-        self.clip_progress_frame = ttk.Frame(self.clip_tab)
+        self.clip_progress_frame = ttk.Frame(container)
         self.clip_progress_frame.grid(row=7, column=0, columnspan=3, padx=8, pady=6, sticky="we")
         self.clip_progress_frame.columnconfigure(0, weight=1)
 
@@ -296,34 +311,21 @@ class BeatMarkerApp:
         self.clip_anim_label = ttk.Label(self.clip_progress_frame, text="", width=12, anchor="w")
         self.clip_anim_label.grid(row=0, column=1, padx=(8, 0))
 
-        self.clip_status_label = ttk.Label(self.clip_tab, text="Ready")
+        self.clip_status_label = ttk.Label(container, text="Ready")
         self.clip_status_label.grid(row=8, column=0, columnspan=2, padx=8, pady=6, sticky="w")
 
-        self.open_clip_folder_button = ttk.Button(self.clip_tab, text="Open Folder", command=self.open_clip_folder, state=tk.DISABLED)
+        self.open_clip_folder_button = ttk.Button(container, text="Open Folder", command=self.open_clip_folder, state=tk.DISABLED)
         self.open_clip_folder_button.grid(row=8, column=2, padx=8, pady=6, sticky="e")
-
-        self.console_toggle_button = ttk.Button(
-            self.clip_tab, text="▼ Console Output", command=self._toggle_console
-        )
-        self.console_toggle_button.grid(row=9, column=0, columnspan=3, padx=8, pady=(10, 2), sticky="w")
-
-        self.clip_console = scrolledtext.ScrolledText(
-            self.clip_tab, height=10, state="disabled", font=("Consolas", 9), wrap="word"
-        )
-        self.clip_console.grid(row=10, column=0, columnspan=3, padx=8, pady=(0, 8), sticky="nsew")
-        self.clip_tab.rowconfigure(10, weight=1)
-
-        self.clip_console_redirector = ConsoleRedirector(self.clip_console, self.root)
 
     def _toggle_console(self):
         if self.console_visible:
-            self.clip_console.grid_remove()
-            self.clip_tab.rowconfigure(10, weight=0)
-            self.console_toggle_button.config(text="▶ Console Output")
+            self.app_console.grid_remove()
+            self.root.rowconfigure(2, weight=0)
+            self.console_toggle_button.config(text="▼ Show App Console")
         else:
-            self.clip_console.grid()
-            self.clip_tab.rowconfigure(10, weight=1)
-            self.console_toggle_button.config(text="▼ Console Output")
+            self.app_console.grid()
+            self.root.rowconfigure(2, weight=1)
+            self.console_toggle_button.config(text="▲ Hide App Console")
         self.console_visible = not self.console_visible
 
     def select_input(self):
@@ -331,6 +333,11 @@ class BeatMarkerApp:
         if file_path:
             self.input_entry.delete(0, tk.END)
             self.input_entry.insert(0, file_path)
+            base = os.path.splitext(file_path)[0]
+            auto_out = f"{base}_beats.flac"
+            self.output_entry.delete(0, tk.END)
+            self.output_entry.insert(0, auto_out)
+            self.selected_output = auto_out
 
     def select_output(self):
         inp = self.input_entry.get()
@@ -338,17 +345,19 @@ class BeatMarkerApp:
             messagebox.showwarning("Warning", "Please select an input file first.")
             return
         base = os.path.splitext(inp)[0]
-        fmt = self.format_combo.get()
+        fmt = "flac"
         default = f"{base}_beats.{fmt}"
         out = filedialog.asksaveasfilename(defaultextension=f".{fmt}", initialfile=os.path.basename(default), filetypes=[(fmt.upper(), f"*.{fmt}"), ("All Files", "*.*")])
         if out:
             self.selected_output = out
+            self.output_entry.delete(0, tk.END)
+            self.output_entry.insert(0, out)
 
     def select_download_folder(self):
         folder = filedialog.askdirectory(initialdir=self.default_download_folder)
         if folder:
             self.selected_download_folder = folder
-            self.download_status_label.config(text=f"Target folder: {folder}")
+            self.download_folder_label.config(text=folder)
 
     def _get_downloads_folder(self):
         downloads_folder = os.path.join(os.path.expanduser("~"), "Downloads")
@@ -400,26 +409,15 @@ class BeatMarkerApp:
             messagebox.showerror("Error", "Please select an input file.")
             return
 
-        try:
-            click_duration = float(self.duration_entry.get())
-            click_amplitude = float(self.amplitude_entry.get())
-        except ValueError:
-            messagebox.showerror("Error", "Invalid duration or amplitude value.")
-            return
+        click_duration = 0.001
+        click_amplitude = 0.99
+        fmt = "flac"
 
-        if not (0 < click_amplitude <= 1):
-            messagebox.showerror("Error", "Amplitude must be between 0 and 1.")
-            return
-
-        if not (0 < click_duration <= 1):
-            messagebox.showerror("Error", "Duration must be between 0 and 1 second.")
-            return
-
-        if self.selected_output:
-            output_path = self.selected_output
-        else:
-            fmt = self.format_combo.get() or "flac"
+        output_path = self.output_entry.get()
+        if not output_path:
             output_path = os.path.splitext(input_path)[0] + f"_beats.{fmt}"
+            
+        self.selected_output = output_path
 
         self.status_label.config(text="Processing...")
         self.process_button.config(state=tk.DISABLED)
@@ -542,9 +540,9 @@ class BeatMarkerApp:
         target_folder = self.selected_clip_folder or self.default_download_folder
         os.makedirs(target_folder, exist_ok=True)
 
-        self.clip_console.configure(state="normal")
-        self.clip_console.delete("1.0", tk.END)
-        self.clip_console.configure(state="disabled")
+        self.app_console.configure(state="normal")
+        self.app_console.delete("1.0", tk.END)
+        self.app_console.configure(state="disabled")
 
         self.clip_status_label.config(text="Downloading video...")
         self.clip_button.config(state=tk.DISABLED)
@@ -564,9 +562,7 @@ class BeatMarkerApp:
         input_highres = os.path.join(os.getcwd(), "input_highres.mp4")
         input_proxy = os.path.join(os.getcwd(), "input_proxy.mp4")
 
-        old_stdout, old_stderr = sys.stdout, sys.stderr
-        sys.stdout = self.clip_console_redirector
-        sys.stderr = self.clip_console_redirector
+
 
         try:
             self._download_clip_source(url, input_highres)
@@ -589,7 +585,6 @@ class BeatMarkerApp:
             self.root.after(0, lambda message=error_message: messagebox.showerror("Error", message))
             self.root.after(0, lambda: self._on_clip_finish())
         finally:
-            sys.stdout, sys.stderr = old_stdout, old_stderr
             self._safe_remove_file(input_proxy)
 
     def _download_clip_source(self, url, output_file):
@@ -709,7 +704,7 @@ class BeatMarkerApp:
         self._stop_cute_animation("clip")
         self.clip_button.config(state=tk.NORMAL)
 
-    def download_audio(self):
+    def download_media(self, preset_key):
         if yt_dlp is None:
             messagebox.showerror("Error", "yt-dlp is not installed. Please install it first.")
             return
@@ -719,37 +714,21 @@ class BeatMarkerApp:
             messagebox.showerror("Error", "Please enter a video link.")
             return
 
-        preset = self.download_preset_combo.get() or "FLAC (lossless)"
-        preset_key = self._preset_to_key(preset)
+        preset = "Video + Audio" if preset_key == "mp4" else "FLAC Audio"
         create_marker = self.create_marker_var.get()
         click_duration = 0.001
         click_amplitude = 0.99
 
-        if create_marker:
-            try:
-                click_duration = float(self.duration_entry.get())
-                click_amplitude = float(self.amplitude_entry.get())
-            except ValueError:
-                messagebox.showerror("Error", "Invalid duration or amplitude value for the Beat Marker.")
-                return
-
-            if not (0 < click_amplitude <= 1):
-                messagebox.showerror("Error", "Amplitude must be between 0 and 1.")
-                return
-
-            if not (0 < click_duration <= 1):
-                messagebox.showerror("Error", "Duration must be between 0 and 1 second.")
-                return
-
-        if preset_key in {"flac", "wav", "m4a", "mp3"} and shutil.which("ffmpeg") is None:
-            messagebox.showerror("Error", "FFmpeg is required for FLAC, WAV, M4A, and MP3 presets.")
+        if shutil.which("ffmpeg") is None:
+            messagebox.showerror("Error", "FFmpeg is required for media extraction.")
             return
 
         target_folder = self.selected_download_folder or self.default_download_folder
         os.makedirs(target_folder, exist_ok=True)
 
         self.download_status_label.config(text=f"Downloading {preset}...")
-        self.download_button.config(state=tk.DISABLED)
+        self.download_audio_btn.config(state=tk.DISABLED)
+        self.download_video_btn.config(state=tk.DISABLED)
         self.open_download_folder_button.config(state=tk.DISABLED)
         self.download_progress.start(10)
         self._start_cute_animation("download", self.download_anim_label)
@@ -757,13 +736,13 @@ class BeatMarkerApp:
 
         threading.Thread(
             target=self._download_thread,
-            args=(url, preset_key, target_folder, create_marker, self.marker_format_combo.get() or "flac", click_duration, click_amplitude),
+            args=(url, preset_key, target_folder, create_marker, "flac", click_duration, click_amplitude),
             daemon=True,
         ).start()
 
     def _download_thread(self, url, preset_key, target_folder, create_marker, marker_format, click_duration, click_amplitude):
         try:
-            output_path = self._download_audio_file(url, preset_key, target_folder, self.download_progress)
+            output_path = self._download_media_file(url, preset_key, target_folder, self.download_progress)
             marker_path = None
             if create_marker:
                 marker_path = self._build_marker_output_path(output_path, marker_format)
@@ -780,7 +759,8 @@ class BeatMarkerApp:
             self.download_status_label.config(text=f"Done! Saved: {output_path} | Marker: {marker_path}")
         else:
             self.download_status_label.config(text=f"Done! Saved: {output_path}")
-        self.download_button.config(state=tk.NORMAL)
+        self.download_audio_btn.config(state=tk.NORMAL)
+        self.download_video_btn.config(state=tk.NORMAL)
         self.open_download_folder_button.config(state=tk.NORMAL)
         self.last_download_folder = os.path.dirname(output_path)
         self.selected_download_folder = self.default_download_folder
@@ -788,7 +768,8 @@ class BeatMarkerApp:
     def _on_download_finish(self):
         self.download_progress.stop()
         self._stop_cute_animation("download")
-        self.download_button.config(state=tk.NORMAL)
+        self.download_audio_btn.config(state=tk.NORMAL)
+        self.download_video_btn.config(state=tk.NORMAL)
         self.selected_download_folder = self.default_download_folder
 
     def _preset_to_key(self, preset):
@@ -801,7 +782,7 @@ class BeatMarkerApp:
         }
         return mapping.get(preset, "flac")
 
-    def _download_audio_file(self, url, preset_key, target_folder, progress_bar):
+    def _download_media_file(self, url, preset_key, target_folder, progress_bar):
         options = {
             "outtmpl": os.path.join(target_folder, "%(title)s.%(ext)s"),
             "noplaylist": True,
@@ -810,15 +791,16 @@ class BeatMarkerApp:
             "progress_hooks": [lambda d: self._yt_dlp_progress_hook(d, progress_bar)],
         }
 
-        if preset_key == "best":
-            options["format"] = "bestaudio/best"
+        if preset_key == "mp4":
+            options["format"] = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+            options["merge_output_format"] = "mp4"
         else:
             options["format"] = "bestaudio/best"
             options["postprocessors"] = [
                 {
                     "key": "FFmpegExtractAudio",
                     "preferredcodec": preset_key,
-                    "preferredquality": "0" if preset_key == "flac" else "320",
+                    "preferredquality": "0",
                 }
             ]
 
@@ -826,7 +808,10 @@ class BeatMarkerApp:
             info = ydl.extract_info(url, download=True)
             base_path = ydl.prepare_filename(info)
 
-        if preset_key == "best":
+        if preset_key == "mp4":
+            expected_path = os.path.splitext(base_path)[0] + ".mp4"
+            if os.path.exists(expected_path):
+                return expected_path
             return base_path
 
         return os.path.splitext(base_path)[0] + f".{preset_key}"
